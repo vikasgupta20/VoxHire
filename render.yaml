@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: voxhire-api
+    runtime: node
+    rootDir: server
+    plan: free
+    buildCommand: npm install
+    startCommand: npm run start
+    healthCheckPath: /api/health
+    envVars:
+      - key: PORT
+        value: 8787
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: MURF_API_KEY
+        sync: false
+      - key: MURF_API_URL
+        value: https://api.murf.ai/v1/speech/generate
+      - key: MURF_MODEL_VERSION
+        value: GEN2
