@@ -1,130 +1,91 @@
-# VoxHire - AI Voice Interview & Resume Coach
+# VoxHire
 
-VoxHire is a full-stack, voice-first web app for hackathon demos.
+Voice-first AI web app for resume building and interview coaching.
 
-## Features
+VoxHire is designed as a practical assistant for candidates who want to prepare faster using spoken interaction instead of form-heavy workflows.
 
-- Voice-first input using Web Speech API (live transcript)
-- Resume generation from spoken background
-- AI interview mode with personality switching:
-  - Strict HR
-  - Friendly HR
-  - Technical interviewer
-- Answer feedback with confidence + clarity tips
-- `Improve My Answer` rewrite and voice playback
-- Murf TTS integration with browser speech fallback
-- Smart voice commands:
-  - `Start interview`
-  - `Next question`
-  - `Improve this answer`
-- Demo quick actions for instant walkthrough
-- Conversation history panel
-- Dark-mode focused premium UI
+## What it does
 
-## Tech Stack
+- Converts spoken profile input into a structured resume
+- Runs conversational interview practice (one question at a time)
+- Analyzes answers with short feedback (confidence + clarity)
+- Rewrites weak answers via `Improve My Answer`
+- Plays AI responses with Murf TTS (browser speech fallback included)
+- Supports voice commands: `Start interview`, `Next question`, `Improve this answer`
 
-- Frontend: React + Vite + Tailwind CSS + Framer Motion
-- Backend: Node.js + Express
-- AI: Gemini API
-- TTS: Murf API
+## Core modules
 
-## Project Structure
+- Resume Builder
+	- Takes spoken background and generates a structured, professional resume draft
+- Interview Mode
+	- Simulates a live interviewer and asks one question at a time
+- Feedback Panel
+	- Scores answer quality and gives concise, actionable tips
+- Improve My Answer
+	- Rephrases answers with stronger confidence, structure, and professionalism
+- Conversation History
+	- Stores Q&A + feedback for quick review during practice
 
-- `client/` - React UI, voice handling, animations
-- `server/` - Express API, Gemini prompts, Murf TTS bridge
+## Stack
 
-## Setup
+- Frontend: React, Vite, Tailwind CSS, Framer Motion
+- Backend: Node.js, Express
+- Speech-to-Text: Web Speech API
+- LLM: Gemini API
+- Text-to-Speech: Murf API
 
-1. Install dependencies:
+## Architecture
 
-```bash
-cd client && npm install
-cd ../server && npm install
-```
+- Frontend handles:
+	- Voice capture and transcript state
+	- Interactive UI and animations
+	- Session state for interview and history
+- Backend handles:
+	- Prompt construction for each AI task
+	- Gemini request orchestration
+	- Murf TTS generation and response normalization
+	- Graceful fallbacks when providers fail
 
-2. Configure env files:
+## AI workflows
 
-- Copy `client/.env.example` to `client/.env`
-- Copy `server/.env.example` to `server/.env`
-- Add your API keys in `server/.env`
+- Resume generation flow:
+	- Speech transcript -> resume prompt -> Gemini -> formatted resume text
+- Interview flow:
+	- Previous context + mode -> Gemini interviewer prompt -> next question
+- Feedback flow:
+	- Candidate answer -> feedback prompt -> concise coaching output
+- Improve flow:
+	- Raw answer -> rewrite prompt -> refined answer + TTS playback
 
-3. Start backend:
+## Voice features
 
-```bash
-cd server
-npm run dev
-```
+- Live speech-to-text using browser Web Speech API
+- Animated microphone state indicators:
+	- Listening
+	- Thinking
+	- Speaking
+- Smart command parsing:
+	- `Start interview`
+	- `Next question`
+	- `Improve this answer`
+- TTS output with provider fallback support
 
-4. Start frontend:
+## UI/UX highlights
 
-```bash
-cd client
-npm run dev
-```
+- Dark-first premium interface
+- Glass-style cards and layered gradient atmosphere
+- Responsive layout for desktop and mobile
+- Framer Motion transitions for smoother interactions
+- Real-time confidence bar for answer quality cues
 
-The frontend runs on `http://localhost:5173` and backend on `http://localhost:8787`.
+## Project folders
+
+- `client/` frontend app
+- `server/` backend API
 
 ## Notes
 
-- For best speech recognition quality, use Chrome or Edge.
-- If Murf credentials are absent or unavailable, the app falls back to browser speech synthesis.
+- Best speech recognition experience is on Chrome/Edge.
+- If external APIs are unavailable, backend fallbacks keep the app usable for demos.
 
-## Deploy (Vercel + Render)
 
-Use this path for a working production setup:
-
-- Frontend (`client`) on Vercel
-- Backend (`server`) on Render
-
-### 1. Push to GitHub
-
-- Make sure `server/.env` and `client/.env` are not committed (root `.gitignore` is configured for this).
-- Push the repo to GitHub.
-
-### 2. Deploy Backend on Render
-
-You can deploy with the included `render.yaml` blueprint.
-
-- In Render, create `New +` -> `Blueprint`.
-- Connect your GitHub repo.
-- Render will detect `render.yaml` and create `voxhire-api`.
-
-Set/verify these backend environment variables in Render:
-
-- `PORT=8787`
-- `GEMINI_API_KEY=<your_gemini_key>`
-- `GEMINI_MODEL=gemini-2.5-flash`
-- `MURF_API_KEY=<your_murf_key>`
-- `MURF_API_URL=https://api.murf.ai/v1/speech/generate`
-- `MURF_MODEL_VERSION=GEN2`
-
-After deploy, copy your backend URL, for example:
-
-- `https://voxhire-api.onrender.com`
-
-### 3. Deploy Frontend on Vercel
-
-- In Vercel, import the same GitHub repo.
-- Set `Root Directory` to `client`.
-- Build command: `npm run build`.
-- Output directory: `dist`.
-
-Add this frontend env var in Vercel:
-
-- `VITE_API_BASE_URL=https://<your-render-backend-domain>/api`
-
-Example:
-
-- `VITE_API_BASE_URL=https://voxhire-api.onrender.com/api`
-
-`client/vercel.json` is already included for SPA route rewrites.
-
-### 4. Redeploy and test
-
-- Open your Vercel URL.
-- Test mic input, resume generation, interview question generation, and TTS playback.
-
-## Security
-
-- Never commit real API keys to GitHub.
-- Rotate any keys that were shared in chat or screenshots.
