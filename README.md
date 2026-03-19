@@ -70,6 +70,13 @@ VoxHire is designed as a practical assistant for candidates who want to prepare 
 	- `Improve this answer`
 - TTS output with provider fallback support
 
+## Authentication
+
+- Frontend uses simple localStorage-based authentication for demo use
+- Supports both Sign Up and Sign In in the app login card
+- User accounts and session are stored in browser localStorage
+- This is demo-grade auth and not suitable for production security
+
 ## UI/UX highlights
 
 - Dark-first premium interface

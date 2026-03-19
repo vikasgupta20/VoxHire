@@ -4,7 +4,11 @@ import {
   ArrowRight,
   Bot,
   ClipboardList,
+  Eye,
+  EyeOff,
+  LogOut,
   RefreshCw,
+  ShieldCheck,
   UserRound,
 } from "lucide-react";
 
@@ -16,10 +20,14 @@ import { VoiceOrb } from "./components/VoiceOrb";
 import { useSpeechRecognition } from "./hooks/useSpeechRecognition";
 import { useVoicePlayer } from "./hooks/useVoicePlayer";
 import {
+  clearAuthSession,
   fetchFeedback,
   fetchInterviewQuestion,
+  getAuthSession,
   generateResume,
   improveAnswer,
+  signInLocal,
+  signUpLocal,
 } from "./services/apiClient";
 import { scoreConfidence } from "./utils/confidence";
 import { parseVoiceCommand } from "./utils/voiceCommands";
@@ -37,19 +45,42 @@ const VOICE_MAP = {
 const demoResumeInput =
   "My name is Sam Rivera. I am a front-end engineer with three years of experience in React and TypeScript. I built a dashboard that improved reporting speed by thirty percent and a chatbot onboarding flow that reduced support tickets.";
 
+const LANGUAGE_OPTIONS = [
+  { code: "en-US", label: "English (US)" },
+  { code: "en-IN", label: "English (India)" },
+  { code: "hi-IN", label: "Hindi" },
+  { code: "ta-IN", label: "Tamil" },
+  { code: "te-IN", label: "Telugu" },
+];
+
+const LANGUAGE_STORAGE_KEY = "voxhire_selected_language";
+
 function App() {
   const [spokenInput, setSpokenInput] = useState("");
   const [resumeText, setResumeText] = useState("");
   const [mode, setMode] = useState(INTERVIEWER_MODES[1]);
   const [currentQuestion, setCurrentQuestion] = useState("");
+  const [askedQuestions, setAskedQuestions] = useState([]);
   const [answerText, setAnswerText] = useState("");
   const [feedbackText, setFeedbackText] = useState("");
+  const [aiConfidenceScore, setAiConfidenceScore] = useState(null);
   const [improvedText, setImprovedText] = useState("");
   const [history, setHistory] = useState([]);
   const [isThinking, setIsThinking] = useState(false);
   const [errorText, setErrorText] = useState("");
   const [activeSection, setActiveSection] = useState("resume");
   const [retryHandler, setRetryHandler] = useState(null);
+  const [authStatus, setAuthStatus] = useState("checking");
+  const [authUser, setAuthUser] = useState(null);
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [authNotice, setAuthNotice] = useState("");
+  const [authMode, setAuthMode] = useState("signin");
+  const [showPassword, setShowPassword] = useState(false);
+  const [credentials, setCredentials] = useState({ username: "", password: "" });
+  const [selectedLanguage, setSelectedLanguage] = useState(
+    () => localStorage.getItem(LANGUAGE_STORAGE_KEY) || import.meta.env.VITE_SPEECH_LANG || "en-US",
+  );
 
   const {
     isSupported,
@@ -60,27 +91,52 @@ function App() {
     startListening,
     stopListening,
     resetTranscript,
-  } = useSpeechRecognition();
+  } = useSpeechRecognition(selectedLanguage);
   const { isSpeaking, speak } = useVoicePlayer();
   const answerInputRef = useRef(null);
   const processedFinalRef = useRef("");
+  const usernameInputRef = useRef(null);
 
   useEffect(() => {
     document.documentElement.classList.add("dark");
+    const session = getAuthSession();
+    if (!session) {
+      setAuthStatus("unauthenticated");
+      return;
+    }
+
+    setAuthUser(session);
+    setAuthStatus("authenticated");
   }, []);
 
   useEffect(() => {
-    if (!transcript.trim()) {
+    localStorage.setItem(LANGUAGE_STORAGE_KEY, selectedLanguage);
+  }, [selectedLanguage]);
+
+  useEffect(() => {
+    if (authStatus !== "unauthenticated") {
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      usernameInputRef.current?.focus();
+    }, 0);
+
+    return () => clearTimeout(timeoutId);
+  }, [authStatus]);
+
+  useEffect(() => {
+    if (!finalText.trim()) {
       return;
     }
 
     if (activeSection === "interview") {
-      setAnswerText(transcript);
+      setAnswerText(finalText);
       return;
     }
 
-    setSpokenInput(transcript);
-  }, [activeSection, transcript]);
+    setSpokenInput(finalText);
+  }, [activeSection, finalText]);
 
   const safeRun = async (job, retryFn) => {
     setErrorText("");
@@ -99,7 +155,10 @@ function App() {
   const handleGenerateResume = async (input = spokenInput) => {
     await safeRun(
       async () => {
-        const payload = await generateResume(input);
+        const payload = await generateResume({
+          spokenInput: input,
+          language: selectedLanguage,
+        });
         setResumeText(payload.resume);
         setActiveSection("resume");
         await speak({ text: "Your resume draft is ready.", voiceId: VOICE_MAP.assistant });
@@ -121,13 +180,25 @@ function App() {
           mode,
           history: buildHistoryText(),
           lastAnswer,
+          askedQuestions: askedQuestions.slice(-8),
+          language: selectedLanguage,
         });
 
-        setCurrentQuestion(payload.question);
+        const nextQuestion = (payload.question || "").trim();
+        setCurrentQuestion(nextQuestion);
+        if (nextQuestion) {
+          setAskedQuestions((prev) => {
+            if (prev.includes(nextQuestion)) {
+              return prev;
+            }
+            return [...prev, nextQuestion];
+          });
+        }
         setFeedbackText("");
+        setAiConfidenceScore(null);
         setImprovedText("");
         setActiveSection("interview");
-        await speak({ text: payload.question, voiceId: VOICE_MAP[mode] });
+        await speak({ text: nextQuestion, voiceId: VOICE_MAP[mode] });
       },
       () => handleNextQuestion(lastAnswer),
     );
@@ -135,6 +206,12 @@ function App() {
 
   const handleStartInterview = async () => {
     setActiveSection("interview");
+    setCurrentQuestion("");
+    setAnswerText("");
+    setFeedbackText("");
+    setImprovedText("");
+    setAiConfidenceScore(null);
+    setAskedQuestions([]);
     await handleNextQuestion("");
   };
 
@@ -149,9 +226,13 @@ function App() {
         const payload = await fetchFeedback({
           answer,
           role: "Software Engineer",
+          language: selectedLanguage,
         });
 
         setFeedbackText(payload.feedback);
+        setAiConfidenceScore(
+          typeof payload.confidenceScore === "number" ? payload.confidenceScore : null,
+        );
         setHistory((prev) => [
           {
             id: Date.now(),
@@ -175,7 +256,11 @@ function App() {
 
     await safeRun(
       async () => {
-        const payload = await improveAnswer({ answer, mode });
+        const payload = await improveAnswer({
+          answer,
+          mode,
+          language: selectedLanguage,
+        });
         setImprovedText(payload.improvedAnswer);
         await speak({
           text: payload.improvedAnswer,
@@ -218,6 +303,41 @@ function App() {
   }, [answerText, finalText]);
 
   const confidence = useMemo(() => scoreConfidence(answerText), [answerText]);
+  const aiConfidence = useMemo(() => {
+    if (typeof aiConfidenceScore === "number") {
+      const clamped = Math.max(1, Math.min(10, aiConfidenceScore));
+      return {
+        display: `${clamped}/10`,
+        score: clamped * 10,
+      };
+    }
+
+    if (!feedbackText) {
+      return null;
+    }
+
+    const outOfTenMatch = feedbackText.match(/confidence:\s*(\d+(?:\.\d+)?)\s*\/\s*10/i);
+    if (outOfTenMatch) {
+      const value = Number.parseFloat(outOfTenMatch[1]);
+      const clamped = Math.max(0, Math.min(10, value));
+      return {
+        display: `${clamped.toFixed(clamped % 1 === 0 ? 0 : 1)}/10`,
+        score: Math.round(clamped * 10),
+      };
+    }
+
+    const percentMatch = feedbackText.match(/confidence:\s*(\d{1,3})\s*%/i);
+    if (percentMatch) {
+      const value = Number.parseInt(percentMatch[1], 10);
+      const clamped = Math.max(0, Math.min(100, value));
+      return {
+        display: `${clamped}%`,
+        score: clamped,
+      };
+    }
+
+    return null;
+  }, [aiConfidenceScore, feedbackText]);
 
   const phase = useMemo(() => {
     if (errorText || micError) return "error";
@@ -240,6 +360,7 @@ function App() {
     }
 
     resetTranscript();
+    processedFinalRef.current = "";
     if (activeSection === "interview") {
       setAnswerText("");
     } else {
@@ -247,6 +368,156 @@ function App() {
     }
     startListening();
   };
+
+  const handleAuthSubmit = async (event) => {
+    event.preventDefault();
+    setAuthError("");
+    setAuthNotice("");
+
+    if (!credentials.username.trim() || !credentials.password.trim()) {
+      setAuthError("Username and password are required.");
+      return;
+    }
+
+    setIsAuthenticating(true);
+
+    try {
+      const payload = authMode === "signup"
+        ? signUpLocal({
+          username: credentials.username.trim(),
+          password: credentials.password,
+        })
+        : signInLocal({
+          username: credentials.username.trim(),
+          password: credentials.password,
+        });
+
+      setAuthUser(payload.user);
+      setAuthStatus("authenticated");
+      if (authMode === "signup") {
+        setAuthNotice("Account created and signed in.");
+      }
+      setCredentials({ username: "", password: "" });
+      setShowPassword(false);
+    } catch (error) {
+      setAuthError(error.message || "Authentication failed. Please try again.");
+    } finally {
+      setIsAuthenticating(false);
+    }
+  };
+
+  const handleLogout = () => {
+    clearAuthSession();
+    setAuthUser(null);
+    setAuthStatus("unauthenticated");
+  };
+
+  if (authStatus === "checking") {
+    return (
+      <main className="relative grid min-h-screen place-items-center px-4 py-8 text-slate-900 dark:text-slate-100">
+        <div className="rounded-2xl border border-white/45 bg-white/82 px-6 py-5 text-sm backdrop-blur-lg dark:border-white/10 dark:bg-slate-900/45">
+          Verifying your session...
+        </div>
+      </main>
+    );
+  }
+
+  if (authStatus !== "authenticated") {
+    return (
+      <main className="relative grid min-h-screen place-items-center overflow-hidden px-4 py-8 text-slate-900 dark:text-slate-100">
+        <div className="bg-blob blob-1" />
+        <div className="bg-blob blob-2" />
+        <div className="bg-blob blob-3" />
+        <div className="w-full max-w-md rounded-[28px] border border-white/45 bg-white/80 p-6 shadow-[0_24px_65px_-28px_rgba(147,51,234,0.4)] backdrop-blur-[20px] dark:border-white/15 dark:bg-slate-900/45">
+          <div className="mb-4 flex items-center gap-2">
+            <ShieldCheck className="text-cyan-400" size={20} />
+            <h1 className="font-display text-2xl font-bold text-slate-900 dark:text-white">
+              {authMode === "signup" ? "VoxHire Sign Up" : "VoxHire Sign In"}
+            </h1>
+          </div>
+          <p className="mb-4 text-sm text-slate-700 dark:text-slate-300">
+            {authMode === "signup"
+              ? "Create a local account to access resume coaching and interview practice."
+              : "Sign in to access resume coaching and interview practice."}
+          </p>
+
+          <form className="space-y-3" onSubmit={handleAuthSubmit}>
+            <input
+              ref={usernameInputRef}
+              type="text"
+              value={credentials.username}
+              onChange={(event) =>
+                setCredentials((prev) => ({ ...prev, username: event.target.value }))
+              }
+              placeholder="Username"
+              className="w-full rounded-xl border border-white/45 bg-white/82 px-3 py-2 text-sm text-slate-900 outline-none ring-sky-300 transition placeholder:text-slate-600 focus:ring dark:border-white/10 dark:bg-slate-900/55 dark:text-slate-100 dark:ring-cyan-300 dark:placeholder:text-slate-400"
+            />
+            <div className="relative">
+              <input
+                value={credentials.password}
+                onChange={(event) =>
+                  setCredentials((prev) => ({ ...prev, password: event.target.value }))
+                }
+                placeholder="Password"
+                className="w-full rounded-xl border border-white/45 bg-white/82 px-3 py-2 pr-10 text-sm text-slate-900 outline-none ring-sky-300 transition placeholder:text-slate-600 focus:ring dark:border-white/10 dark:bg-slate-900/55 dark:text-slate-100 dark:ring-cyan-300 dark:placeholder:text-slate-400"
+                type={showPassword ? "text" : "password"}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((prev) => !prev)}
+                className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-slate-700 transition hover:bg-white/70 dark:text-slate-300 dark:hover:bg-white/10"
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                title={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+
+            {authNotice && (
+              <div className="rounded-xl border border-sky-300/55 bg-white/85 p-2 text-xs text-sky-900 backdrop-blur-lg dark:border-sky-400/30 dark:bg-sky-500/10 dark:text-sky-100">
+                {authNotice}
+              </div>
+            )}
+
+            {authError && (
+              <div className="rounded-xl border border-amber-300/55 bg-white/85 p-2 text-xs text-amber-900 backdrop-blur-lg dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-100">
+                {authError}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={isAuthenticating}
+              className="inline-flex w-full items-center justify-center rounded-full bg-gradient-to-r from-cyan-500 to-blue-500 px-4 py-2 text-sm font-semibold text-white transition hover:scale-[1.02] hover:shadow-[0_12px_26px_-10px_rgba(14,165,233,0.8)] disabled:opacity-40"
+            >
+              {isAuthenticating
+                ? authMode === "signup"
+                  ? "Creating account..."
+                  : "Signing in..."
+                : authMode === "signup"
+                  ? "Sign Up"
+                  : "Sign In"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode((prev) => (prev === "signup" ? "signin" : "signup"));
+                setAuthError("");
+                setAuthNotice("");
+                setShowPassword(false);
+              }}
+              className="w-full text-center text-xs font-semibold text-sky-800 underline decoration-transparent underline-offset-2 transition hover:decoration-current dark:text-sky-200"
+            >
+              {authMode === "signup"
+                ? "Already have an account? Sign In"
+                : "Need an account? Sign Up"}
+            </button>
+          </form>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="relative min-h-screen overflow-hidden px-4 py-8 text-slate-900 sm:px-6 lg:px-10 dark:text-slate-100">
@@ -265,7 +536,28 @@ function App() {
             </h1>
           </div>
           <div className="flex items-center gap-3">
+            <select
+              value={selectedLanguage}
+              onChange={(event) => setSelectedLanguage(event.target.value)}
+              className="rounded-xl border border-white/50 bg-white/90 px-2.5 py-1.5 text-xs font-semibold text-slate-900 outline-none transition hover:bg-white dark:bg-white/85 dark:text-slate-900"
+              title="Speech and response language"
+            >
+              {LANGUAGE_OPTIONS.map((option) => (
+                <option key={option.code} value={option.code} className="bg-white text-slate-900">
+                  {option.label}
+                </option>
+              ))}
+            </select>
             <StatusBadge phase={phase} />
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="inline-flex items-center gap-2 rounded-full border border-white/50 bg-white/84 px-3 py-1.5 text-xs font-semibold text-sky-800 transition hover:scale-[1.02] hover:bg-white/95 dark:bg-white/10 dark:text-slate-100 dark:hover:bg-white/15"
+              title={authUser?.username ? `Signed in as ${authUser.username}` : "Sign out"}
+            >
+              <LogOut size={14} />
+              Logout
+            </button>
           </div>
         </header>
 
@@ -450,8 +742,15 @@ function App() {
               )}
 
               <div className="mt-4">
+                <div className="mb-2 rounded-2xl border border-white/45 bg-white/82 p-3 text-xs text-slate-800 backdrop-blur-lg dark:border-white/10 dark:bg-slate-900/50 dark:text-slate-200">
+                  <p className="uppercase tracking-[0.15em] text-slate-700 dark:text-slate-400">AI Evaluator Confidence</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    {aiConfidence ? aiConfidence.display : "Not available yet"}
+                  </p>
+                </div>
+
                 <div className="mb-1 flex items-center justify-between text-xs uppercase tracking-[0.15em] text-slate-700 dark:text-slate-400">
-                  <span>Live Confidence</span>
+                  <span>Live Confidence (Heuristic)</span>
                   <span>{confidence.label}</span>
                 </div>
                 <div className="h-3 overflow-hidden rounded-full bg-sky-100/95 dark:bg-slate-800/70">
